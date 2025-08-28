@@ -1,14 +1,13 @@
-import './App.css'
+import React from 'react';
+import MapComponent from './components/MapComponent';
+import 'leaflet/dist/leaflet.css';
 
 function App() {
-
   return (
-    <>
-    <h1 class="text-3xl font-bold underline">
-      Hello world!
-    </h1>
-    </>
-  )
+    <div className="w-screen h-screen">
+      <MapComponent />
+    </div>
+  );
 }
 
-export default App
+export default App;
