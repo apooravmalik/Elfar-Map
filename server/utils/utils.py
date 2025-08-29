@@ -2,19 +2,17 @@
 import base64
 import os
 
-def map_color(priority):
+def map_color(status_text):
     """
-    Maps the dvcIconColourPriority_FRK to a color name based on the rules.
-    3 -> blue
-    7 -> red
-    Returns 'gray' as a default if no rule matches.
+    Determines the icon color based on the device's status text.
+    - Returns 'red' if the status contains "fail".
+    - Returns 'blue' for any other status (e.g., "normal").
     """
-    if priority == 3:
-        return 'blue'
-    elif priority == 7:
+    # Check if status_text is a valid string and contains 'fail' (case-insensitive)
+    if isinstance(status_text, str) and 'fail' in status_text.lower():
         return 'red'
     else:
-        return 'gray' # Default color
+        return 'blue' # Default color for "normal" or other states
 
 def convert_blob_to_base64(blob_data):
     """

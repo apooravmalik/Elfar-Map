@@ -3,3 +3,4 @@ Flask-Cors
 SQLAlchemy
 pyodbc
 python-dotenv
+APScheduler
