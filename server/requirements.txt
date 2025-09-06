@@ -4,3 +4,4 @@ SQLAlchemy
 pyodbc
 python-dotenv
 APScheduler
+requests

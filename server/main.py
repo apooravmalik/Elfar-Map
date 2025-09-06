@@ -1,7 +1,8 @@
 # server/main.py
-from flask import Flask, jsonify
+from flask import Flask, jsonify, Response
 from flask_cors import CORS
 from apscheduler.schedulers.background import BackgroundScheduler
+import requests
 
 # Import services
 from services.latlong_service import get_device_data
@@ -24,6 +25,21 @@ def initialize_icons():
     save_icon_from_blob(FENCE_ICON_BLOB, filename="fence_icon.png")
 
 # --- API Endpoints ---
+@app.route('/api/map-image', methods=['GET'])
+def map_image_proxy():
+    """
+    Acts as a proxy to fetch the map image from the local ESRI server.
+    """
+    image_url = "https://esri.tsliss.local/server/services/Data/MapServer/WMSServer?request=GetMap&styles=&version=1.1.1&height=400&width=400&srs(crs)=CRS:84&bbox=86.181563,22.766676,86.218643,22.804039&layers=0,7&format=image/png"
+    try:
+        # Use verify=False if the local server has a self-signed certificate
+        r = requests.get(image_url, stream=True, verify=False)
+        r.raise_for_status() # Raise an exception for bad status codes
+        return Response(r.iter_content(chunk_size=1024), content_type=r.headers['Content-Type'])
+    except requests.exceptions.RequestException as e:
+        print(f"Error fetching map image: {e}")
+        return "Error fetching map image", 500
+
 @app.route('/api/devices', methods=['GET'])
 def get_devices_endpoint():
     """

@@ -22,7 +22,8 @@ last_poll_time = None
 
 # --- Parsing Logic ---
 def parse_device_info(device_name, current_state):
-    name_pattern = re.compile(r'FC-(\d+)\s+Line\s+(\d+)\s+Zone\s+Z(\d+)')
+    # Updated regex to match the actual format: "Fence Controller FC-1 Line 0 Zone Z1"
+    name_pattern = re.compile(r'Fence Controller FC-(\d+)\s+Line\s+(\d+)\s+Zone\s+Z(\d+)')
     match = name_pattern.search(device_name)
     
     if match:
@@ -34,16 +35,18 @@ def parse_device_info(device_name, current_state):
     return {"zone": None, "line": None, "controller_id": None, "device_type": "Unknown"}
 
 # --- Update Production DB Utility ---
-def update_prod_db(prod_db, devices_to_update):
+def update_prod_db(prod_db, devices_to_update, axe_elfar_state_str=None):
     """
     Updates the dvcCurrentStateUser_TXT in the production database for a list of devices.
     """
     try:
         for device in devices_to_update:
-            new_state_str = f"Fence {device.effective_state.capitalize()} {device.zone}_{device.line}_0_FC-{device.controller_id}"
-            if device.device_type == 'axe_Elfar':
-                 new_state_str = f"axe_Elfar{'Connected' if device.effective_state == 'Normal' else 'Disconnected'}"
-
+            if axe_elfar_state_str:
+                new_state_str = axe_elfar_state_str
+            else:
+                new_state_str = f"Fence {device.effective_state.capitalize()} {device.zone}_{device.line}_0_FC-{device.controller_id}"
+                if device.device_type == 'axe_Elfar':
+                    new_state_str = f"axe_Elfar{'Connected' if device.effective_state == 'Normal' else 'Disconnected'}"
 
             prod_db.execute(
                 text("UPDATE device_tbl SET dvcCurrentStateUser_TXT = :state WHERE dvcname_txt = :name"),
@@ -95,22 +98,21 @@ def handle_fence_normal(db_session, changed_device):
     return devices_to_normalize
 
 def handle_axe_elfar(db_session, changed_device):
-    """Handles line-wide state changes for axe_Elfar events."""
-    print(f"HANDLING AXE_ELFAR for {changed_device.dvcname_txt}")
-    controller = changed_device.controller_id
-    line = changed_device.line
+    """
+    Handles global state changes for axe_Elfar events.
+    A disconnect triggers a system-wide fail-safe.
+    """
+    print(f"HANDLING GLOBAL AXE_ELFAR event for {changed_device.dvcname_txt}")
     new_state = 'Normal' if 'Connected' in changed_device.last_state else 'Fail'
+    axe_elfar_state_str = f"axe_Elfar{'Connected' if new_state == 'Normal' else 'Disconnected'}"
 
-    devices_to_update = db_session.query(DeviceState).filter(
-        DeviceState.controller_id == controller,
-        DeviceState.line == line
-    ).all()
+    all_devices = db_session.query(DeviceState).all()
 
-    for device in devices_to_update:
+    for device in all_devices:
         device.effective_state = new_state
-        device.last_state = changed_device.last_state # Propagate the axe_Elfar state
+        device.last_state = axe_elfar_state_str
 
-    return devices_to_update
+    return all_devices, axe_elfar_state_str
 
 
 # --- Main Polling and Orchestration Logic ---
@@ -139,13 +141,23 @@ def poll_and_update_states():
 
         latest_timestamp_in_batch = last_poll_time
         for device_name, current_state, set_time in changed_devices_from_prod:
+            print(f"DEBUG: Processing device {device_name} with state {current_state} at {set_time}")
             
             cached_device = cache_db.query(DeviceState).filter_by(dvcname_txt=device_name).first()
-            if not cached_device or cached_device.last_state == current_state:
+            if not cached_device:
+                print(f"WARNING: Device {device_name} not found in cache!")
+                continue
+                
+            if cached_device.last_state == current_state:
+                print(f"DEBUG: No state change for {device_name} - skipping")
                 continue # Skip if no actual change
+
+            print(f"DEBUG: State changed from '{cached_device.last_state}' to '{current_state}'")
 
             # --- Update cache with the new raw state FIRST ---
             parsed_info = parse_device_info(device_name, current_state)
+            print(f"DEBUG: Parsed info: {parsed_info}")
+            
             cached_device.last_state = current_state
             cached_device.last_set_time = set_time
             for key, value in parsed_info.items():
@@ -153,38 +165,53 @@ def poll_and_update_states():
             
             # --- ORCHESTRATE BUSINESS LOGIC ---
             devices_to_update_in_prod = []
+            axe_elfar_state_str = None
 
             if parsed_info["device_type"] == "axe_Elfar":
-                devices_to_update_in_prod = handle_axe_elfar(cache_db, cached_device)
+                print(f"DEBUG: Handling axe_Elfar event")
+                devices_to_update_in_prod, axe_elfar_state_str = handle_axe_elfar(cache_db, cached_device)
             
             elif 'Fail' in current_state:
+                print(f"DEBUG: Handling Fence Fail event")
                 devices_to_update_in_prod = handle_fence_fail(cache_db, cached_device)
+                print(f"DEBUG: handle_fence_fail returned {len(devices_to_update_in_prod)} devices")
             
             elif 'Normal' in current_state:
+                print(f"DEBUG: Handling Normal event")
                 # Check if the line was previously failed to trigger recovery
                 line_was_failed = any(
                     d.effective_state == 'Fail' for d in cache_db.query(DeviceState).filter_by(
                         controller_id=cached_device.controller_id, line=cached_device.line
                     )
                 )
+                print(f"DEBUG: Line was previously failed: {line_was_failed}")
                 if line_was_failed:
                     devices_to_update_in_prod = handle_fence_normal(cache_db, cached_device)
+                    print(f"DEBUG: handle_fence_normal returned {len(devices_to_update_in_prod)} devices")
                 else: # Simple normal update
                     cached_device.effective_state = 'Normal'
+                    print(f"DEBUG: Simple normal update for {device_name}")
             
             elif 'Alarm' in current_state:
+                print(f"DEBUG: Handling Alarm event")
                 cached_device.effective_state = 'Alarm'
                 # No cascading, so no prod update needed for others
 
             # --- Commit changes to Prod DB ---
+            print(f"DEBUG: About to update {len(devices_to_update_in_prod)} devices in prod DB")
             if devices_to_update_in_prod:
-                update_prod_db(prod_db, devices_to_update_in_prod)
+                try:
+                    update_prod_db(prod_db, devices_to_update_in_prod, axe_elfar_state_str)
+                except Exception as e:
+                    print(f"ERROR in update_prod_db: {e}")
+                    raise
 
             if set_time > latest_timestamp_in_batch:
                 latest_timestamp_in_batch = set_time
         
         cache_db.commit() # Commit all cache changes at the end
-        last_poll_time = latest_timestamp_in_batch
+        # Add a small increment to avoid processing the same timestamp twice
+        last_poll_time = latest_timestamp_in_batch + timedelta(microseconds=1)
         print(f"Successfully processed {len(changed_devices_from_prod)} state changes. New last_poll_time: {last_poll_time}")
 
     except Exception as e:

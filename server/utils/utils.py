@@ -5,14 +5,17 @@ import os
 def map_color(status_text):
     """
     Determines the icon color based on the device's status text.
-    - Returns 'red' if the status contains "fail".
-    - Returns 'blue' for any other status (e.g., "normal").
+    - Returns 'red' for "Fail" and "axe_ElfarDisconnected".
+    - Returns 'blue' for "Normal" and "axe_ElfarConnected".
     """
-    # Check if status_text is a valid string and contains 'fail' (case-insensitive)
-    if isinstance(status_text, str) and 'fail' in status_text.lower():
-        return 'red'
-    else:
-        return 'blue' # Default color for "normal" or other states
+    if isinstance(status_text, str):
+        if 'Fail' in status_text or 'axe_ElfarDisconnected' in status_text:
+            return 'red'
+        if 'Normal' in status_text or 'axe_ElfarConnected' in status_text:
+            return 'blue'
+            
+    # Default to blue if the status is not a string or doesn't match
+    return 'blue'
 
 def convert_blob_to_base64(blob_data):
     """

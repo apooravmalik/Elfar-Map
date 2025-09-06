@@ -10,7 +10,8 @@ def get_device_data():
     """
     db = SessionLocal()
     try:
-        # UPDATED QUERY: Fetches dvcCurrentStateUser_TXT for color logic
+        # CORRECTED QUERY: Fetches devices by name to ensure all controllers are
+        # consistently included, regardless of their current state.
         query = text("""
             SELECT
                 dvcname_txt,
@@ -20,7 +21,7 @@ def get_device_data():
             FROM
                 device_tbl
             WHERE
-                dvcCurrentStateUser_TXT LIKE 'Fence %'
+                dvcname_txt LIKE 'Fence Controller FC-%'
                 OR dvcCurrentStateUser_TXT LIKE '%axe_Elfar%'
             ORDER BY
                 dvcname_txt
@@ -39,7 +40,7 @@ def get_device_data():
                 "latitude": row[1],
                 "longitude": row[2],
                 "status": status_text,
-                # Pass the status text to the map_color function
+                # The map_color function will correctly handle the color based on the status
                 "iconColor": map_color(status_text)
             })
         

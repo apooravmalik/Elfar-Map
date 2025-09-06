@@ -1,12 +1,12 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { MapContainer, ImageOverlay, Marker, Popup } from 'react-leaflet';
 import L from 'leaflet';
 
 const MapComponent = () => {
     const [devices, setDevices] = useState([]);
     
-    const imageUrl = "https://esri.tsliss.local/server/services/Data/MapServer/WMSServer?request=GetMap&styles=&version=1.1.1&height=400&width=400&srs(crs)=CRS:84&bbox=86.181563,22.766676,86.218643,22.804039&layers=0,7&format=image/png";
-
+    const imageUrl = "http://127.0.0.1:5000/api/map-image";
+    
     const imageBounds = [
         [22.766676, 86.181563], 
         [22.804039, 86.218643]
@@ -14,26 +14,25 @@ const MapComponent = () => {
 
     const refreshInterval = 15000;
 
-    // A separate function to handle fetching the device data.
-    const fetchDevices = () => {
+    // Wrap in useCallback to fix the useEffect dependency warning
+    const fetchDevices = useCallback(() => {
         console.log('Fetching device data...');
         fetch('http://localhost:5000/api/devices')
             .then(response => response.json())
-            .then(data => setDevices(data))
+            .then(data => {
+                // Log the data here to see the actual response
+                console.log('Device data fetched:', data);
+                setDevices(data);
+            })
             .catch(error => console.error("Error fetching device data:", error));
-        console.log('Device data fetched:', devices);
-    };
+    }, []);
 
     // This useEffect hook now manages the timer for refreshing data.
     useEffect(() => {
-        // Fetch data immediately when the component mounts
         fetchDevices();
-
-        // Set up an interval to call fetchDevices repeatedly.
         const intervalId = setInterval(fetchDevices, refreshInterval);
-
         return () => clearInterval(intervalId);
-    }, [refreshInterval]); // The effect will re-run if the interval value changes.
+    }, [fetchDevices, refreshInterval]); // Added fetchDevices to the dependency array
 
     const createCustomIcon = (color) => {
         const bgColor = color === 'red' ? 'rgba(255, 0, 0, 0.4)' : 'rgba(0, 0, 255, 0.4)';
