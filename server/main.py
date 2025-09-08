@@ -1,5 +1,5 @@
 # server/main.py
-from flask import Flask, jsonify, Response
+from flask import Flask, jsonify, Response, request
 from flask_cors import CORS
 from apscheduler.schedulers.background import BackgroundScheduler
 import requests
@@ -7,6 +7,12 @@ import requests
 # Import services
 from services.latlong_service import get_device_data
 from services.state_service import initialize_cache_db, poll_and_update_states, get_all_device_states
+from services.cache import (
+    get_all_cached_devices, 
+    get_devices_by_controller_line, 
+    get_cache_statistics,
+    simulate_cascade_query
+)
 from utils.utils import save_icon_from_blob
 
 # --- Flask App Initialization ---
@@ -57,6 +63,57 @@ def get_device_states_endpoint():
     """
     device_states = get_all_device_states()
     return jsonify(device_states)
+
+# --- NEW DEBUGGING API ENDPOINTS ---
+@app.route('/api/debug/cache/all', methods=['GET'])
+def get_all_cached_devices_endpoint():
+    """
+    Debug endpoint: Returns all devices in the cache.
+    """
+    devices = get_all_cached_devices()
+    return jsonify({
+        "total_devices": len(devices),
+        "devices": devices
+    })
+
+@app.route('/api/debug/cache/statistics', methods=['GET'])
+def get_cache_statistics_endpoint():
+    """
+    Debug endpoint: Returns cache statistics including controller/line/zone breakdown.
+    """
+    stats = get_cache_statistics()
+    return jsonify(stats)
+
+@app.route('/api/debug/cache/controller/<int:controller_id>/line/<int:line>', methods=['GET'])
+def get_devices_by_controller_line_endpoint(controller_id, line):
+    """
+    Debug endpoint: Returns all devices for a specific controller and line.
+    """
+    devices = get_devices_by_controller_line(controller_id, line)
+    return jsonify({
+        "controller_id": controller_id,
+        "line": line,
+        "device_count": len(devices),
+        "devices": devices
+    })
+
+@app.route('/api/debug/cache/simulate-cascade', methods=['GET'])
+def simulate_cascade_endpoint():
+    """
+    Debug endpoint: Simulates the cascade query to see what devices would be affected.
+    Query parameters: controller_id, line, fail_zone
+    """
+    controller_id = request.args.get('controller_id', type=int)
+    line = request.args.get('line', type=int)
+    fail_zone = request.args.get('fail_zone', type=int)
+    
+    if controller_id is None or line is None or fail_zone is None:
+        return jsonify({
+            "error": "Missing required parameters: controller_id, line, fail_zone"
+        }), 400
+    
+    result = simulate_cascade_query(controller_id, line, fail_zone)
+    return jsonify(result)
 
 # --- Main Execution Block ---
 if __name__ == '__main__':
